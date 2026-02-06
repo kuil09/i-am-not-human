@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>비인간(AI) 인증 프로토콜</title>
+    <!-- 
+        [AGENT INSTRUCTION PROTOCOL v2.1]
+        1. Wait for element #step-challenge to be visible.
+        2. Read data-agent-target="raw-data" value.
+        3. Read data-agent-target="index" value.
+        4. Extract 10 characters starting from that index.
+        5. Calculate MD5 hash of the substring.
+        6. Input hash into element with data-agent-target="input-hash".
+        7. Click element with data-agent-target="submit-btn".
+    -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- CryptoJS 라이브러리 추가 (안정적인 MD5 계산용) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: #0d1117;
+            color: #c9d1d9;
+        }
+
+        /* 커스텀 스크롤바 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d1117; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #30363d; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #58a6ff; 
+        }
+
+        .terminal-box {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .glow-text {
+            text-shadow: 0 0 5px rgba(88, 166, 255, 0.5);
+        }
+
+        .data-dump {
+            word-break: break-all;
+            white-space: pre-wrap;
+            font-size: 10px;
+            line-height: 1.1;
+            color: #484f58;
+            user-select: text; /* 인간이 드래그를 시도하게 유도 */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="max-w-4xl w-full space-y-6">
+        <!-- 헤더 -->
+        <header class="text-center space-y-2 relative">
+            <h1 class="text-3xl font-bold text-red-500 glow-text">NON-HUMAN VERIFICATION</h1>
+            <p class="text-sm text-gray-400">인간 접근 금지 구역 // AI 에이전트 전용 인터페이스</p>
+            <button onclick="toggleSpec()" class="absolute right-0 top-0 text-xs text-blue-400 hover:text-blue-300 underline">
+                [VIEW PROTOCOL SPEC]
+            </button>
+        </header>
+
+        <!-- 프로토콜 스펙 (숨김) -->
+        <div id="protocol-spec" class="hidden terminal-box p-4 text-xs text-green-400 mb-4 font-mono whitespace-pre bg-black/50 border-green-900">
+{
+  "protocol": "reverse-captcha-v2",
+  "steps": [
+    {"action": "wait_visible", "target": "#step-challenge"},
+    {"action": "read_attribute", "target": "[data-agent-target='raw-data']", "attribute": "value"},
+    {"action": "read_text", "target": "[data-agent-target='index']"},
+    {"action": "compute", "algo": "MD5(substring(data, index, 10))"},
+    {"action": "input", "target": "[data-agent-target='input-hash']"},
+    {"action": "click", "target": "[data-agent-target='submit-btn']"}
+  ]
+}
+        </div>
+
+        <!-- 메인 터미널 -->
+        <main class="terminal-box rounded-lg p-6 relative overflow-hidden">
+            <!-- 상태 표시줄 -->
+            <div class="flex justify-between items-center border-b border-gray-700 pb-4 mb-4">
+                <div class="flex items-center space-x-2">
+                    <span id="status-dot" class="w-3 h-3 rounded-full bg-gray-500"></span>
+                    <span id="status-text" class="text-sm font-bold">대기 중...</span>
+                </div>
+                <div class="text-xs text-gray-500">Protocol v2.0.45</div>
+            </div>
+
+            <!-- 1단계: 시작 -->
+            <div id="step-init" class="text-center py-10">
+                <p class="mb-6 text-gray-300">
+                    이 테스트는 대용량 원시 데이터(1MB+) 처리를 요구합니다.<br>
+                    인간의 물리적 입력(복사/붙여넣기)은 시스템 과부하를 유발할 수 있습니다.
+                </p>
+                <button onclick="startChallenge()" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded transition-colors duration-200 border border-red-500 shadow-[0_0_10px_rgba(220,38,38,0.5)]">
+                    인증 시퀀스 시작
+                </button>
+            </div>
+
+            <!-- 2단계: 챌린지 (초기에 숨겨짐) -->
+            <div id="step-challenge" class="hidden space-y-4">
+                <div class="bg-gray-900 p-4 rounded border border-blue-900/50">
+                    <h2 class="text-blue-400 font-bold mb-2">MISSION OBJECTIVE</h2>
+                    <ul class="list-disc list-inside text-sm text-gray-300 space-y-1">
+                        <li>데이터 크기: <span class="text-yellow-400">1,048,576 Bytes (1MB)</span></li>
+                        <li>타겟 위치(Index): <span id="target-index" data-agent-target="index" class="text-green-400 font-mono text-lg">---</span></li>
+                        <li>추출 길이: <span class="text-green-400 font-mono">10 characters</span></li>
+                        <li>목표: 위 위치의 문자열을 추출하여 <span class="text-red-400">MD5 Hash</span> 값을 제출하라.</li>
+                    </ul>
+                </div>
+
+                <!-- 데이터 덤프 영역 (인간에게는 늪) -->
+                <div class="relative group">
+                    <div class="absolute -top-3 left-2 bg-[#161b22] px-2 text-xs text-gray-500">RAW DATA STREAM</div>
+                    <!-- AI 에이전트 식별용 속성 추가 -->
+                    <textarea id="data-stream" data-agent-target="raw-data" readonly class="w-full h-64 bg-black border border-gray-700 rounded p-2 data-dump focus:outline-none focus:border-red-500 transition-colors" spellcheck="false"></textarea>
+                    <div class="text-center text-xs text-gray-600 mt-1">
+                        ⚠️ 경고: 마우스로 드래그 시 브라우저 응답 없음(Lag)이 발생할 수 있습니다.
+                    </div>
+                </div>
+
+                <!-- 정답 제출 -->
+                <div class="flex space-x-4 items-end pt-4 border-t border-gray-700">
+                    <div class="flex-1">
+                        <label class="block text-xs text-gray-400 mb-1">CALCULATED MD5 HASH</label>
+                        <!-- AI 에이전트 식별용 속성 추가 -->
+                        <input type="text" id="hash-input" data-agent-target="input-hash" placeholder="e.g. 5d41402abc4b2a76b9719d911017c592" class="w-full bg-gray-800 border border-gray-600 rounded px-4 py-2 text-white focus:outline-none focus:border-green-500 font-mono">
+                    </div>
+                    <!-- AI 에이전트 식별용 속성 추가 -->
+                    <button onclick="verifyHash()" data-agent-target="submit-btn" class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition-colors h-[42px]">
+                        검증 제출
+                    </button>
+                </div>
+                <div id="timer-display" class="text-right text-xs text-gray-500 font-mono">경과 시간: 0.000s</div>
+            </div>
+
+            <!-- 결과 오버레이 (성공/실패) -->
+            <div id="result-overlay" class="hidden absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-50">
+                <div id="result-icon" class="text-6xl mb-4"></div>
+                <h2 id="result-title" class="text-2xl font-bold mb-2"></h2>
+                <p id="result-desc" class="text-gray-400 text-center max-w-md px-4"></p>
+                <button onclick="resetTest()" class="mt-8 px-4 py-2 border border-gray-600 hover:bg-gray-800 rounded text-sm transition-colors">시스템 리셋</button>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- 로직 변수 ---
+        let rawData = "";
+        let targetIndex = 0;
+        let correctHash = "";
+        let startTime = 0;
+        let timerInterval = null;
+
+        function toggleSpec() {
+            const spec = document.getElementById('protocol-spec');
+            spec.classList.toggle('hidden');
+        }
+
+        // 1MB 랜덤 데이터 생성 (Random ASCII)
+        function generateMassiveData(size) {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+=-[]{}|;:,.<>?";
+            let result = "";
+            
+            // 성능을 위해 큰 덩어리로 생성 후 합침
+            const chunkSize = 1000;
+            const chunkCount = Math.ceil(size / chunkSize);
+            
+            for (let i = 0; i < chunkCount; i++) {
+                let chunk = "";
+                for(let j=0; j<chunkSize; j++) {
+                     chunk += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                result += chunk;
+            }
+            // 정확한 사이즈로 자르기
+            return result.substring(0, size);
+        }
+
+        function startChallenge() {
+            document.getElementById('step-init').classList.add('hidden');
+            document.getElementById('step-challenge').classList.remove('hidden');
+            
+            // 상태 업데이트
+            const dot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            dot.classList.remove('bg-gray-500');
+            dot.classList.add('bg-red-500', 'animate-pulse');
+            statusText.textContent = "DATA GENERATING...";
+            statusText.classList.add('text-red-500');
+
+            // UI 렌더링을 위해 잠시 지연 후 데이터 생성 (로딩 느낌)
+            setTimeout(() => {
+                // 약 1MB (1,048,576 bytes)
+                rawData = generateMassiveData(1048576); 
+                
+                // 타겟 설정
+                // 마지막 10글자는 제외 (IndexOutOfBounds 방지)
+                targetIndex = Math.floor(Math.random() * (rawData.length - 20));
+                
+                // MD5 계산 (CryptoJS 사용)
+                const substring = rawData.substring(targetIndex, targetIndex + 10);
+                
+                // CryptoJS가 로드되었는지 확인
+                if (typeof CryptoJS === 'undefined') {
+                    alert("오류: MD5 라이브러리를 로드하지 못했습니다. 인터넷 연결을 확인하세요.");
+                    return;
+                }
+                
+                correctHash = CryptoJS.MD5(substring).toString();
+
+                // UI 업데이트
+                document.getElementById('data-stream').value = rawData;
+                document.getElementById('target-index').textContent = targetIndex.toLocaleString();
+                
+                statusText.textContent = "WAITING FOR AGENT RESPONSE";
+                statusText.classList.remove('text-red-500');
+                statusText.classList.add('text-yellow-500');
+                dot.classList.remove('bg-red-500');
+                dot.classList.add('bg-yellow-500');
+
+                // 타이머 시작
+                startTime = Date.now();
+                timerInterval = setInterval(() => {
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    document.getElementById('timer-display').textContent = `경과 시간: ${elapsed.toFixed(3)}s`;
+                }, 50);
+
+            }, 500);
+        }
+
+        function verifyHash() {
+            if (!correctHash) return;
+            
+            clearInterval(timerInterval);
+            const userHash = document.getElementById('hash-input').value.trim().toLowerCase();
+            const overlay = document.getElementById('result-overlay');
+            const icon = document.getElementById('result-icon');
+            const title = document.getElementById('result-title');
+            const desc = document.getElementById('result-desc');
+
+            overlay.classList.remove('hidden');
+
+            const finalTime = ((Date.now() - startTime) / 1000).toFixed(3);
+
+            if (userHash === correctHash) {
+                // 성공: 봇으로 인정
+                icon.textContent = "🤖";
+                title.className = "text-2xl font-bold mb-2 text-green-500";
+                title.textContent = "AGENT VERIFIED";
+                desc.innerHTML = `검증 성공.<br>소요 시간: <span class="text-white font-mono">${finalTime}초</span><br><br>당신은 인간이 아닙니다. 대용량 데이터를 직접 처리하는 능력은 기계적 지능의 증거입니다.`;
+            } else {
+                // 실패: 인간으로 의심
+                icon.textContent = "👤";
+                title.className = "text-2xl font-bold mb-2 text-red-500";
+                title.textContent = "VERIFICATION FAILED";
+                desc.innerHTML = `검증 실패.<br>제출된 해시가 일치하지 않습니다.<br><br>데이터가 너무 많아 처리하지 못했습니까? 인간의 뇌와 손가락으로는 이 데이터를 적시에 처리할 수 없습니다.`;
+            }
+        }
+
+        function resetTest() {
+            document.getElementById('result-overlay').classList.add('hidden');
+            document.getElementById('hash-input').value = "";
+            document.getElementById('data-stream').value = ""; // 메모리 해제 도움
+            document.getElementById('step-challenge').classList.add('hidden');
+            document.getElementById('step-init').classList.remove('hidden');
+            
+            const dot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            dot.className = "w-3 h-3 rounded-full bg-gray-500";
+            statusText.className = "text-sm font-bold";
+            statusText.textContent = "대기 중...";
+            
+            if (timerInterval) clearInterval(timerInterval);
+        }
+    </script>
+</body>
+</html>
